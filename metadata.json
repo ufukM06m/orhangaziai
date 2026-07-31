@@ -1,0 +1,10 @@
+{
+  "name": "Orhan Gazi Sesli Yapay Zeka",
+  "description": "Osmanlı Devleti 2. Hükümdarı Orhan Gazi ile sesli ve etkileşimli 3D yapay zekâ sohbet sistemi.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
