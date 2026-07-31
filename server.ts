@@ -251,35 +251,50 @@ async function callElevenLabsTTS(apiKey: string, voiceId: string, text: string) 
 // API Route for ElevenLabs Text-To-Speech Proxy
 app.post("/api/tts", async (req, res) => {
   try {
-    const { text, apiKey: clientApiKey } = req.body;
+    const { text, apiKey: clientApiKey, voiceId: clientVoiceId } = req.body;
     const apiKey = clientApiKey || process.env.ELEVENLABS_API_KEY;
-    // Preferred library voice ID (Seyfullah - mF7tIc9VLrznhGooGjaT)
-    const targetVoiceId = "mF7tIc9VLrznhGooGjaT";
-    // Premade deep male voice ID (Adam) available on all free/paid accounts
-    const premadeVoiceId = "pNInz6obpgDQGcFmaJgB";
 
     if (!text || typeof text !== "string") {
       return res.status(400).json({ error: "Geçerli bir metin gereklidir." });
     }
 
     if (!apiKey) {
+      console.warn("ElevenLabs API Key bulunamadı.");
       return res.status(400).json({ error: "ElevenLabs API Key bulunamadı.", fallbackNeeded: true });
     }
 
-    let response = await callElevenLabsTTS(apiKey, targetVoiceId, text);
+    // List of premade male voices supported on all ElevenLabs tiers (Free & Paid)
+    const maleVoiceCandidates = [
+      clientVoiceId,
+      "JBFvLpsea8v128hqFTEj", // George (Warm, deep, mature male)
+      "pNInz6obpgDQGcFmaJgB", // Adam (Deep male)
+      "N2lVS1w4EtoT3dr4eOWO", // Callum (Intense deep male)
+      "mF7tIc9VLrznhGooGjaT"  // Seyfullah (Library voice)
+    ].filter(Boolean) as string[];
 
-    // If library voice fails due to paid_plan_required or free tier limitations,
-    // automatically retry with ElevenLabs premade male voice (Adam)
-    if (!response.ok) {
-      const retryResponse = await callElevenLabsTTS(apiKey, premadeVoiceId, text);
-      if (retryResponse.ok) {
-        response = retryResponse;
+    let response: Response | null = null;
+    let lastError: string = "";
+
+    for (const voiceId of maleVoiceCandidates) {
+      try {
+        const resCandidate = await callElevenLabsTTS(apiKey, voiceId, text);
+        if (resCandidate.ok) {
+          response = resCandidate;
+          break;
+        } else {
+          lastError = await resCandidate.text();
+          console.warn(`ElevenLabs voice ${voiceId} returned status ${resCandidate.status}: ${lastError}`);
+        }
+      } catch (err: any) {
+        console.warn(`ElevenLabs call error for voice ${voiceId}:`, err?.message || err);
       }
     }
 
-    if (!response.ok) {
-      return res.status(response.status).json({ 
+    if (!response || !response.ok) {
+      console.error("ElevenLabs TTS failed for all candidate voices. Last error:", lastError);
+      return res.status(500).json({ 
         error: "ElevenLabs ses üretimi başarısız oldu.", 
+        details: lastError,
         fallbackNeeded: true 
       });
     }

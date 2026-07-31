@@ -810,32 +810,29 @@ function fallbackWebSpeech(
   const voices = window.speechSynthesis.getVoices();
   const maleKeywords = ['male', 'erkek', 'tolga', 'cem', 'ahmet', 'hakan', 'emre', 'davut', 'adam', 'david', 'stefan', 'george', 'alex', 'daniel'];
 
-  // Only select non-female voices
-  const nonFemaleVoices = voices.filter((v) => !isFemaleVoice(v));
-
-  // 1. Try non-female Turkish male voice
-  let selectedVoice = nonFemaleVoices.find(
-    (v) => (v.lang.toLowerCase().includes('tr')) && maleKeywords.some((kw) => v.name.toLowerCase().includes(kw))
+  const turkishVoices = voices.filter((v) => v.lang.toLowerCase().includes('tr'));
+  let selectedVoice = turkishVoices.find((v) =>
+    maleKeywords.some((kw) => v.name.toLowerCase().includes(kw))
   );
 
-  // 2. Try any non-female Turkish voice
-  if (!selectedVoice) {
-    selectedVoice = nonFemaleVoices.find((v) => v.lang.toLowerCase().includes('tr'));
+  // If no explicitly male Turkish voice, pick any Turkish voice
+  if (!selectedVoice && turkishVoices.length > 0) {
+    selectedVoice = turkishVoices[0];
   }
 
-  // 3. Try any male voice in any language
+  // If no Turkish voice at all, try male voices in other languages
   if (!selectedVoice) {
-    selectedVoice = nonFemaleVoices.find((v) => maleKeywords.some((kw) => v.name.toLowerCase().includes(kw)));
-  }
-
-  // 4. Try any non-female voice
-  if (!selectedVoice && nonFemaleVoices.length > 0) {
-    selectedVoice = nonFemaleVoices[0];
+    selectedVoice = voices.find((v) => maleKeywords.some((kw) => v.name.toLowerCase().includes(kw))) || voices[0];
   }
 
   if (selectedVoice) {
     utterance.voice = selectedVoice;
   }
+
+  // Force deep male pitch (0.38) if using default/female voice, otherwise deep pitch (0.70)
+  const isFemale = selectedVoice ? isFemaleVoice(selectedVoice) : true;
+  utterance.pitch = isFemale ? 0.38 : (config.pitch || 0.70);
+  utterance.rate = config.rate || 0.82;
 
   utterance.onstart = () => {
     const estDuration = (text.length * 0.08) / (config.rate || 0.84);
