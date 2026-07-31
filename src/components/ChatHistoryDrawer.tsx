@@ -80,6 +80,15 @@ export const ChatHistoryDrawer: React.FC<ChatHistoryDrawerProps> = ({
                       <>
                         <Bot className="w-3 h-3 text-[#eebb55]" />
                         <span className="font-mono text-[10px] text-[#eebb55] font-bold">Orhan Gazi</span>
+                        {msg.mode === 'gemini' ? (
+                          <span className="font-mono text-[9px] px-1.5 py-0.2 rounded border border-emerald-500/40 text-emerald-400 bg-emerald-950/40 font-semibold ml-1">
+                            ⚡ Gemini AI
+                          </span>
+                        ) : msg.mode === 'fallback' ? (
+                          <span className="font-mono text-[9px] px-1.5 py-0.2 rounded border border-amber-500/30 text-amber-400/80 bg-amber-950/20 font-normal ml-1">
+                            📜 Dahili Hafıza
+                          </span>
+                        ) : null}
                       </>
                     )}
                     <span className="font-mono text-[9px] text-zinc-600 ml-1">

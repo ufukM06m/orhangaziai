@@ -154,6 +154,7 @@ export default function App() {
         role: 'model',
         text: replyText,
         timestamp: new Date(),
+        mode: data.mode === 'gemini' ? 'gemini' : 'fallback',
       };
 
       setMessages((prev) => [...prev, newModelMsg]);

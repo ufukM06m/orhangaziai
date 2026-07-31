@@ -3,6 +3,7 @@ export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   timestamp: Date;
+  mode?: 'gemini' | 'fallback';
 }
 
 export interface HistoricalMilestone {
