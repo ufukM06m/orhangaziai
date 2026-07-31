@@ -50,12 +50,21 @@ export default function App() {
       rec.onerror = (event: any) => {
         console.error('Speech recognition error:', event.error);
         setVoiceState('idle');
-        setStatusLabelText('SES DUYULAMADI');
-        typeWriterInstant('> Sualiniz tam anlaşılamadı, lütfedip mikrofona tekrar hitap ediniz...');
+
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setStatusLabelText('MİKROFON İZNİ YOK');
+          typeWriterInstant('> Tarayıcı mikrofon izni verilmedi. Üst bar veya adres çubuğundan izin verin veya "Yazı İle Sual Sor" seçeneğini kullanın.');
+        } else if (event.error === 'network') {
+          setStatusLabelText('BAĞLANTI UYARISI');
+          typeWriterInstant('> Ses tanıma bağlantısı kurulamadı. "Yazı İle Sual Sor" butonundan yazarak Orhan Gazi ile konuşabilirsiniz.');
+        } else {
+          setStatusLabelText('SES DUYULAMADI');
+          typeWriterInstant('> Sualiniz tam anlaşılamadı. Dilerseniz mikrofona tekrar basın veya yazarak sual yöneltin...');
+        }
 
         setTimeout(() => {
           setStatusLabelText('SESLİ İLETİŞİM');
-        }, 3000);
+        }, 4000);
       };
 
       rec.onend = () => {

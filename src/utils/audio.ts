@@ -735,7 +735,9 @@ export async function speakText(
         const audio = new Audio(url);
         currentAudio = audio;
 
+        let started = false;
         audio.onplay = () => {
+          started = true;
           const duration = audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)
             ? audio.duration
             : text.length * 0.085;
@@ -752,8 +754,15 @@ export async function speakText(
           fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
         };
 
-        await audio.play();
-        return;
+        try {
+          await audio.play();
+          return;
+        } catch (playErr) {
+          console.warn('Audio play failed, falling back to WebSpeech:', playErr);
+          if (!started && onStart) onStart(text.length * 0.085);
+          fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
+          return;
+        }
       }
     } catch (e) {
       console.warn('ElevenLabs API unavailable, falling back to Deep Male Web Speech:', e);
