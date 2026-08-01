@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, BookOpen, History, Keyboard, Sparkles, Anvil, ShieldAlert, Drum, Bird } from 'lucide-react';
+import { Volume2, VolumeX, BookOpen, History, Keyboard, Sparkles, Anvil, ShieldAlert, Drum, Bird, Mic } from 'lucide-react';
 import { soundEngine } from '../utils/audio';
 
 interface TopHeaderNavProps {
@@ -8,6 +8,7 @@ interface TopHeaderNavProps {
   onOpenArchives: () => void;
   onOpenHistory: () => void;
   onOpenTextInput: () => void;
+  onOpenMicHelp?: () => void;
   historyCount: number;
 }
 
@@ -17,6 +18,7 @@ export const TopHeaderNav: React.FC<TopHeaderNavProps> = ({
   onOpenArchives,
   onOpenHistory,
   onOpenTextInput,
+  onOpenMicHelp,
   historyCount,
 }) => {
   return (
@@ -54,6 +56,18 @@ export const TopHeaderNav: React.FC<TopHeaderNavProps> = ({
             <Keyboard className="w-3.5 h-3.5 text-[#eebb55]" />
             <span className="hidden md:inline">Yazılı Sual</span>
           </button>
+
+          {/* Mic Help button */}
+          {onOpenMicHelp && (
+            <button
+              onClick={onOpenMicHelp}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-950/40 hover:bg-amber-900/50 border border-amber-700/50 text-amber-300 text-xs font-mono transition-all hover:border-[#eebb55] cursor-pointer shadow-sm"
+              title="Mobil Ses ve Mikrofon İzni Rehberi"
+            >
+              <Mic className="w-3.5 h-3.5 text-[#eebb55]" />
+              <span className="hidden sm:inline">Ses İzni Yardım</span>
+            </button>
+          )}
 
           {/* Historical Archives */}
           <button

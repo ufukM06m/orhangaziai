@@ -7,6 +7,7 @@ import { PromptChips } from './components/PromptChips';
 import { TextInputModal } from './components/TextInputModal';
 import { HistoricalArchivesModal } from './components/HistoricalArchivesModal';
 import { ChatHistoryDrawer } from './components/ChatHistoryDrawer';
+import { MobileMicHelpModal } from './components/MobileMicHelpModal';
 import { soundEngine, speakText, defaultVoiceConfig, VoiceConfig } from './utils/audio';
 
 export default function App() {
@@ -23,40 +24,54 @@ export default function App() {
   const [isArchiveOpen, setIsArchiveOpen] = useState<boolean>(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [isTextInputOpen, setIsTextInputOpen] = useState<boolean>(false);
+  const [isMicHelpOpen, setIsMicHelpOpen] = useState<boolean>(false);
+  const [micErrorMessage, setMicErrorMessage] = useState<string>('');
 
   // Speech Recognition Ref
   const recognitionRef = useRef<any>(null);
   const typeIntervalRef = useRef<any>(null);
 
-  useEffect(() => {
-    // Initialize Speech Recognition if supported
+  // Initialize Speech Recognition once
+  const initSpeechRecognition = () => {
+    if (recognitionRef.current) return recognitionRef.current;
+
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    if (SpeechRecognition) {
+    if (!SpeechRecognition) return null;
+
+    try {
       const rec = new SpeechRecognition();
       rec.lang = 'tr-TR';
+      rec.continuous = false;
       rec.interimResults = false;
       rec.maxAlternatives = 1;
+
+      rec.onstart = () => {
+        setVoiceState('listening');
+        setStatusLabelText('SİZİ DİNLİYOR...');
+        typeWriterInstant('> Sizi dinliyoruz, sualinizi mikrofona söyleyiniz...');
+      };
 
       rec.onresult = async (event: any) => {
         const userSpeech = event.results[0][0]?.transcript;
         if (!userSpeech) return;
-
         soundEngine.playClick();
         handleUserMessage(userSpeech);
       };
 
       rec.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
+        console.warn('Speech recognition error event:', event.error);
         setVoiceState('idle');
 
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          setStatusLabelText('MİKROFON İZNİ VERİLMEDİ');
-          typeWriterInstant('> Mobil tarayıcı mikrofon izni vermedi. Lütfen adres çubuğundaki kilit ikonuna basıp mikrofona izin veriniz.');
+          setStatusLabelText('MİKROFON İZNİ GEREKLİ');
+          setMicErrorMessage('Mobil tarayıcınızda mikrofon izni engellendi veya vermediniz.');
+          setIsMicHelpOpen(true);
+          typeWriterInstant('> Mobil tarayıcı mikrofon izni vermedi. Açılan kılavuzdan izni etkinleştirebilir veya yazarak sorabilirsiniz.');
         } else if (event.error === 'network') {
           setStatusLabelText('BAĞLANTI UYARISI');
-          typeWriterInstant('> Ses tanıma ağına ulaşılamadı. "Yazı İle Sual Sor" seçeneğini kullanabilirsiniz.');
+          typeWriterInstant('> Ses tanıma ağına ulaşılamadı. "Yazılı Sual" seçeneğini kullanabilirsiniz.');
         } else if (event.error === 'no-speech') {
           setStatusLabelText('SES ALINAMADI');
           typeWriterInstant('> Mikrofondan ses alınamadı. Lütfen daha yakın ve yüksek sesle söyleyiniz...');
@@ -71,11 +86,19 @@ export default function App() {
       };
 
       rec.onend = () => {
-        // Managed by handleUserMessage or reset
+        setVoiceState((prev) => (prev === 'listening' ? 'idle' : prev));
       };
 
       recognitionRef.current = rec;
+      return rec;
+    } catch (e) {
+      console.error('Failed to instantiate SpeechRecognition:', e);
+      return null;
     }
+  };
+
+  useEffect(() => {
+    initSpeechRecognition();
 
     return () => {
       if (typeIntervalRef.current) clearInterval(typeIntervalRef.current);
@@ -209,7 +232,7 @@ export default function App() {
   };
 
   // Toggle Microphone with Mobile Permission Prompt Support
-  const handleToggleMic = async () => {
+  const handleToggleMic = () => {
     if (window.speechSynthesis) window.speechSynthesis.cancel();
     soundEngine.playClick();
 
@@ -222,77 +245,27 @@ export default function App() {
       return;
     }
 
-    // Step 1: Explicitly request browser microphone permission via getUserMedia
-    // This triggers native iOS Safari and Android Chrome permission dialogs
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Permission granted! Stop dummy stream tracks immediately so speech recognition can use mic
-        stream.getTracks().forEach((track) => track.stop());
-      } catch (err: any) {
-        console.warn('Microphone permission error:', err);
-        setStatusLabelText('MİKROFON İZNİ GEREKLİ');
-        typeWriterInstant('> Mobil cihazınızda mikrofon izni verilmedi. Lütfen adres çubuğundaki kilit simgesinden mikrofona izin veriniz.');
-        setVoiceState('idle');
-        return;
-      }
-    }
+    const rec = initSpeechRecognition();
 
-    // Step 2: Fallback SpeechRecognition initialization if not set
-    if (!recognitionRef.current) {
-      const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-      if (SpeechRecognition) {
-        const rec = new SpeechRecognition();
-        rec.lang = 'tr-TR';
-        rec.interimResults = false;
-        rec.maxAlternatives = 1;
-        rec.onresult = async (event: any) => {
-          const userSpeech = event.results[0][0]?.transcript;
-          if (!userSpeech) return;
-          soundEngine.playClick();
-          handleUserMessage(userSpeech);
-        };
-        rec.onerror = (event: any) => {
-          console.error('Speech recognition error:', event.error);
-          setVoiceState('idle');
-          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-            setStatusLabelText('MİKROFON İZNİ VERİLMEDİ');
-            typeWriterInstant('> Mobil tarayıcı mikrofon izni vermedi.');
-          } else {
-            setStatusLabelText('SES ALINAMADI');
-            typeWriterInstant('> Mikrofondan ses alınamadı. Lütfen tekrar deneyiniz...');
-          }
-          setTimeout(() => setStatusLabelText('SESLİ İLETİŞİM'), 3500);
-        };
-        recognitionRef.current = rec;
-      } else {
-        setStatusLabelText('SES DESTEKLENMİYOR');
-        typeWriterInstant('> Bu mobil tarayıcıda ses tanıma desteklenmiyor. "Yazı İle Sual Sor" kutusuna yönlendiriliyorsunuz...');
-        setTimeout(() => setIsTextInputOpen(true), 1200);
-        return;
-      }
+    if (!rec) {
+      setStatusLabelText('SES DESTEKLENMİYOR');
+      setMicErrorMessage('Mobil tarayıcınızda veya bu uygulamada ses tanıma (Speech Recognition) API desteklenmiyor.');
+      setIsMicHelpOpen(true);
+      typeWriterInstant('> Bu tarayıcıda ses tanıma desteklenmiyor. Yazılı sual penceresine yönlendiriliyorsunuz...');
+      setTimeout(() => setIsTextInputOpen(true), 1200);
+      return;
     }
 
     try {
-      // Abort previous instances if active
-      try { recognitionRef.current.abort(); } catch (_) {}
-
-      setTimeout(() => {
-        try {
-          recognitionRef.current?.start();
-          setVoiceState('listening');
-          setStatusLabelText('SİZİ DİNLİYOR...');
-          typeWriterInstant('> Sizi dinliyoruz, sualinizi mikrofona iletiniz...');
-        } catch (e) {
-          console.warn('Recognition start exception:', e);
-          setVoiceState('listening');
-          setStatusLabelText('SİZİ DİNLİYOR...');
-        }
-      }, 80);
-    } catch (e) {
-      console.error('Mic toggle error:', e);
+      try { rec.abort(); } catch (_) {}
+      rec.start();
+      setVoiceState('listening');
+      setStatusLabelText('SİZİ DİNLİYOR...');
+      typeWriterInstant('> Sizi dinliyoruz, sualinizi mikrofona iletiniz...');
+    } catch (e: any) {
+      console.warn('Mic start exception:', e);
+      setVoiceState('listening');
+      setStatusLabelText('SİZİ DİNLİYOR...');
     }
   };
 
@@ -359,6 +332,10 @@ export default function App() {
           soundEngine.playClick();
           setIsTextInputOpen(true);
         }}
+        onOpenMicHelp={() => {
+          soundEngine.playClick();
+          setIsMicHelpOpen(true);
+        }}
         historyCount={messages.length}
       />
 
@@ -385,6 +362,10 @@ export default function App() {
         subtitleText={subtitleText}
         onToggleMic={handleToggleMic}
         statusLabelText={statusLabelText}
+        onOpenMicHelp={() => {
+          soundEngine.playClick();
+          setIsMicHelpOpen(true);
+        }}
       />
 
       {/* Text Input Modal */}
@@ -409,6 +390,18 @@ export default function App() {
         messages={messages}
         onClearHistory={handleClearHistory}
         onReplaySpeech={handleReplaySpeech}
+      />
+
+      {/* Mobile Microphone & Audio Permission Help Modal */}
+      <MobileMicHelpModal
+        isOpen={isMicHelpOpen}
+        onClose={() => setIsMicHelpOpen(false)}
+        onRetryMic={handleToggleMic}
+        onOpenTextInput={() => {
+          soundEngine.playClick();
+          setIsTextInputOpen(true);
+        }}
+        errorMessage={micErrorMessage}
       />
 
     </div>

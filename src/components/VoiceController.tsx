@@ -7,6 +7,7 @@ interface VoiceControllerProps {
   subtitleText: string;
   onToggleMic: () => void;
   statusLabelText: string;
+  onOpenMicHelp?: () => void;
 }
 
 export const VoiceController: React.FC<VoiceControllerProps> = ({
@@ -14,6 +15,7 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({
   subtitleText,
   onToggleMic,
   statusLabelText,
+  onOpenMicHelp,
 }) => {
   const isRecording = voiceState === 'listening';
   const isSpeaking = voiceState === 'speaking';
@@ -111,17 +113,29 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({
             )}
           </button>
 
-          <span
-            className={`font-mono text-[10px] sm:text-[11px] tracking-widest uppercase transition-colors ${
-              isRecording
-                ? 'text-red-400 font-bold animate-pulse'
-                : isSpeaking || isThinking
-                ? 'text-[#eebb55] font-bold'
-                : 'text-zinc-400'
-            }`}
-          >
-            {statusLabelText}
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className={`font-mono text-[10px] sm:text-[11px] tracking-widest uppercase transition-colors ${
+                isRecording
+                  ? 'text-red-400 font-bold animate-pulse'
+                  : isSpeaking || isThinking
+                  ? 'text-[#eebb55] font-bold'
+                  : 'text-zinc-400'
+              }`}
+            >
+              {statusLabelText}
+            </span>
+
+            {onOpenMicHelp && (
+              <button
+                onClick={onOpenMicHelp}
+                className="font-mono text-[9px] sm:text-[10px] text-[#eebb55] underline hover:text-amber-200 transition-colors cursor-pointer ml-1 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/40"
+                title="Mobil Mikrofon İzni Kılavuzunu Gör"
+              >
+                [İzin Rehberi]
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
