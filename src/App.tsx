@@ -232,7 +232,7 @@ export default function App() {
   };
 
   // Toggle Microphone with Mobile Permission Prompt Support
-  const handleToggleMic = () => {
+  const handleToggleMic = async () => {
     if (window.speechSynthesis) window.speechSynthesis.cancel();
     soundEngine.playClick();
 
@@ -245,11 +245,28 @@ export default function App() {
       return;
     }
 
+    // Step 1: Explicitly trigger browser microphone permission dialog via getUserMedia inside user click gesture
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Release tracks immediately so SpeechRecognition can acquire hardware mic
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        console.warn('getUserMedia mic permission check error:', err);
+        setMicErrorMessage('Mobil tarayıcı mikrofona izin vermedi. Lütfen kilit simgesinden veya rehberdeki adımdan izin veriniz.');
+        setIsMicHelpOpen(true);
+        setStatusLabelText('MİKROFON İZNİ GEREKLİ');
+        setVoiceState('idle');
+        return;
+      }
+    }
+
+    // Step 2: Initialize Speech Recognition
     const rec = initSpeechRecognition();
 
     if (!rec) {
       setStatusLabelText('SES DESTEKLENMİYOR');
-      setMicErrorMessage('Mobil tarayıcınızda veya bu uygulamada ses tanıma (Speech Recognition) API desteklenmiyor.');
+      setMicErrorMessage('Mobil tarayıcınızda ses tanıma (Speech Recognition) API desteklenmiyor.');
       setIsMicHelpOpen(true);
       typeWriterInstant('> Bu tarayıcıda ses tanıma desteklenmiyor. Yazılı sual penceresine yönlendiriliyorsunuz...');
       setTimeout(() => setIsTextInputOpen(true), 1200);
