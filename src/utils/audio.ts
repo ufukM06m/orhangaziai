@@ -710,11 +710,8 @@ let deepVoiceAudioCtx: AudioContext | null = null;
 
 function applyDeepMaleVoiceFilter(audioElement: HTMLAudioElement) {
   try {
-    // Disable pitch preservation so lowering playbackRate physically lowers vocal pitch by ~4 semitones
-    (audioElement as any).preservesPitch = false;
-    (audioElement as any).mozPreservesPitch = false;
-    (audioElement as any).webkitPreservesPitch = false;
-    audioElement.playbackRate = 0.81; // Lower frequency down into deep male baritone register
+    // Keep normal natural human speaking speed
+    audioElement.playbackRate = 1.0;
 
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     if (AudioCtx) {
@@ -727,27 +724,120 @@ function applyDeepMaleVoiceFilter(audioElement: HTMLAudioElement) {
 
       const source = deepVoiceAudioCtx.createMediaElementSource(audioElement);
 
-      // 1. Lowpass Filter: Cut frequencies above 2200Hz to eliminate thin/female treble brightness
+      // Subtle EQ warmth: high clarity up to 8000Hz so speech is crisp and crystal clear
       const lowpass = deepVoiceAudioCtx.createBiquadFilter();
       lowpass.type = 'lowpass';
-      lowpass.frequency.value = 2200;
+      lowpass.frequency.value = 8000;
 
-      // 2. Lowshelf Bass Filter: Boost 140Hz chest resonance (+6dB) for Orhan Gazi's deep, dignified tone
+      // Mild +2dB bass warmth
       const bassBoost = deepVoiceAudioCtx.createBiquadFilter();
       bassBoost.type = 'lowshelf';
-      bassBoost.frequency.value = 140;
-      bassBoost.gain.value = 6.0;
+      bassBoost.frequency.value = 120;
+      bassBoost.gain.value = 2.0;
 
       source.connect(lowpass);
       lowpass.connect(bassBoost);
       bassBoost.connect(deepVoiceAudioCtx.destination);
     }
   } catch (e) {
-    console.warn('Deep voice Web Audio filter warning:', e);
+    console.warn('Voice filter warning:', e);
     try {
-      audioElement.playbackRate = 0.81;
+      audioElement.playbackRate = 1.0;
     } catch (_) {}
   }
+}
+
+// Helper to try Free Microsoft Edge Neural Turkish Male Voice (tr-TR-AhmetNeural - Deep Wise Male Voice)
+async function tryMicrosoftEdgeTts(
+  text: string,
+  onStart?: (durationSeconds?: number) => void,
+  onEnd?: () => void,
+  onError?: () => void
+): Promise<boolean> {
+  try {
+    const response = await fetch('/api/edge-tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice: 'tr-TR-AhmetNeural', pitch: '-14Hz', rate: '-8%' }),
+    });
+
+    if (response.ok) {
+      const blob = await response.blob();
+      if (blob.size < 100) return false;
+      const blobUrl = URL.createObjectURL(blob);
+      const audio = new Audio(blobUrl);
+      currentAudio = audio;
+
+      audio.onplay = () => {
+        const duration = audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)
+          ? audio.duration
+          : text.length * 0.075;
+        if (onStart) onStart(duration);
+      };
+
+      audio.onended = () => {
+        currentAudio = null;
+        if (onEnd) onEnd();
+      };
+
+      audio.onerror = () => {
+        currentAudio = null;
+        if (onError) onError();
+      };
+
+      await audio.play();
+      return true;
+    }
+  } catch (e) {
+    console.warn('Microsoft Edge TTS notice:', e);
+  }
+  return false;
+}
+
+// Helper to try official Google Cloud Text-to-Speech REST API (tr-TR-Wavenet-B / tr-TR-Neural2-B Male Voices)
+async function tryGoogleCloudTts(
+  text: string,
+  onStart?: (durationSeconds?: number) => void,
+  onEnd?: () => void,
+  onError?: () => void
+): Promise<boolean> {
+  try {
+    const response = await fetch('/api/google-tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+
+    if (response.ok) {
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const audio = new Audio(blobUrl);
+      currentAudio = audio;
+
+      audio.onplay = () => {
+        const duration = audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)
+          ? audio.duration
+          : text.length * 0.085;
+        if (onStart) onStart(duration);
+      };
+
+      audio.onended = () => {
+        currentAudio = null;
+        if (onEnd) onEnd();
+      };
+
+      audio.onerror = () => {
+        currentAudio = null;
+        if (onError) onError();
+      };
+
+      await audio.play();
+      return true;
+    }
+  } catch (e) {
+    console.warn('Google Cloud TTS endpoint notice:', e);
+  }
+  return false;
 }
 
 // Helper to try Free Google Neural Turkish TTS Endpoint with Deep Male Pitch Modulation
@@ -795,9 +885,51 @@ async function tryFreeGoogleTts(
   return false;
 }
 
-// Speak text with ElevenLabs priority -> Free Deep Male Neural Turkish TTS -> Web Speech fallback
+// Turkish Ottoman Phonetic Preprocessor for Natural Audio Intonation & Correct Dialect Reading
+export function preprocessTurkishOttomanTTS(text: string): string {
+  if (!text) return text;
+  let t = text;
+
+  // 1. Gazi -> Gaazi phonetic replacement for authentic oral Turkish pronunciation
+  t = t.replace(/\b([Gg])azi\b/g, (m, g) => (g === "G" ? "Gaazi" : "gaazi"));
+  t = t.replace(/\b([Gg])aziler\b/g, (m, g) => (g === "G" ? "Gaaziler" : "gaaziler"));
+  t = t.replace(/\b([Gg])azileri\b/g, (m, g) => (g === "G" ? "Gaazileri" : "gaazileri"));
+  t = t.replace(/\b([Gg])azilerimiz\b/g, (m, g) => (g === "G" ? "Gaazilerimiz" : "gaazilerimiz"));
+  t = t.replace(/\b([Gg])azimizin\b/g, (m, g) => (g === "G" ? "Gaazimizin" : "gaazimizin"));
+  t = t.replace(/\b([Gg])azimiz\b/g, (m, g) => (g === "G" ? "Gaazimiz" : "gaazimiz"));
+  t = t.replace(/\b([Gg])azinin\b/g, (m, g) => (g === "G" ? "Gaazinin" : "gaazinin"));
+  t = t.replace(/\b([Gg])aziye\b/g, (m, g) => (g === "G" ? "Gaaziye" : "gaaziye"));
+  t = t.replace(/\b([Gg])aziden\b/g, (m, g) => (g === "G" ? "Gaaziden" : "gaaziden"));
+  t = t.replace(/\b([Gg])aza\b/g, (m, g) => (g === "G" ? "Gaaza" : "gaaza"));
+  t = t.replace(/\b([Gg])azam\b/g, (m, g) => (g === "G" ? "Gaazam" : "gaazam"));
+  t = t.replace(/\b([Gg])azamız\b/g, (m, g) => (g === "G" ? "Gaazamız" : "gaazamız"));
+
+  // 2. Fix English word collision in Turkish TTS engines: "nice" -> "niçe" (Turkish pronunciation instead of English "nays"/"nis")
+  t = t.replace(/\b([Nn])ice\b/g, (m, n) => (n === "N" ? "Niçe" : "niçe"));
+
+  // 3. Islam / İslâm -> Natural Turkish phonetic "İslam" (avoids 'islim' or mispronounced circumflexes)
+  t = t.replace(/İsl[âa]m/g, "İslam");
+  t = t.replace(/isl[âa]m/g, "islam");
+  t = t.replace(/İsl[âa]mi/g, "İslami");
+  t = t.replace(/isl[âa]mi/g, "islami");
+  t = t.replace(/İsl[âa]mın/g, "İslamın");
+  t = t.replace(/isl[âa]mın/g, "islamın");
+  t = t.replace(/İsl[âa]ma/g, "İslama");
+  t = t.replace(/isl[âa]ma/g, "islama");
+  t = t.replace(/İsl[âa]mda/g, "İslamda");
+  t = t.replace(/isl[âa]mda/g, "islamda");
+  t = t.replace(/İsl[âa]mdan/g, "İslamdan");
+  t = t.replace(/isl[âa]mdan/g, "islamdan");
+
+  // 4. Normalize circumflexes so Edge / WebSpeech engines read naturally in local Turkish
+  t = t.replace(/â/g, "a").replace(/Â/g, "A").replace(/î/g, "i").replace(/Î/g, "İ").replace(/û/g, "u").replace(/Û/g, "U");
+
+  return t;
+}
+
+// Speak text order: Microsoft Edge Neural Male TTS (100% Free, High Quality) -> Google Cloud TTS -> ElevenLabs -> Web Speech API
 export async function speakText(
-  text: string,
+  rawText: string,
   config: VoiceConfig = defaultVoiceConfig,
   onStart?: (durationSeconds?: number) => void,
   onEnd?: () => void,
@@ -806,7 +938,21 @@ export async function speakText(
 ) {
   stopAllSpeech();
 
-  // 1. Try ElevenLabs / Server-side TTS proxy endpoint first if an API key is available
+  const text = preprocessTurkishOttomanTTS(rawText);
+
+  // 1. Try Free Microsoft Edge Neural Turkish Male Voice (tr-TR-AhmetNeural)
+  const edgeSuccess = await tryMicrosoftEdgeTts(text, onStart, onEnd, onError);
+  if (edgeSuccess) return;
+
+  // 2. Try Free Google Neural Turkish TTS Endpoint (Server-side, guaranteed fallback)
+  const freeGSuccess = await tryFreeGoogleTts(text, onStart, onEnd, onError);
+  if (freeGSuccess) return;
+
+  // 3. Try official Google Cloud TTS (Male Wavenet / Neural2 Turkish voice)
+  const gTtsSuccess = await tryGoogleCloudTts(text, onStart, onEnd, onError);
+  if (gTtsSuccess) return;
+
+  // 2. Try ElevenLabs / Server-side TTS proxy endpoint if an API key is available
   const localKey = typeof window !== 'undefined' ? (localStorage.getItem('elevenlabs_api_key') || undefined) : undefined;
   const hasElevenKey = Boolean(config.elevenLabsApiKey || localKey);
 
@@ -828,9 +974,7 @@ export async function speakText(
         const audio = new Audio(url);
         currentAudio = audio;
 
-        let started = false;
         audio.onplay = () => {
-          started = true;
           const duration = audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)
             ? audio.duration
             : text.length * 0.085;
@@ -842,42 +986,31 @@ export async function speakText(
           if (onEnd) onEnd();
         };
 
-        audio.onerror = async () => {
+        audio.onerror = () => {
           currentAudio = null;
-          const freeSuccess = await tryFreeGoogleTts(text, onStart, onEnd, onError);
-          if (!freeSuccess) {
-            fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
-          }
+          fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
         };
 
         try {
           await audio.play();
           return;
         } catch (playErr) {
-          console.warn('Audio play failed, trying Free Google Deep Male TTS:', playErr);
-          if (!started && onStart) onStart(text.length * 0.085);
-          const freeSuccess = await tryFreeGoogleTts(text, onStart, onEnd, onError);
-          if (!freeSuccess) {
-            fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
-          }
+          console.warn('ElevenLabs audio play failed, resorting to WebSpeech:', playErr);
+          fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
           return;
         }
       }
     } catch (e) {
-      console.warn('ElevenLabs API unavailable, trying Free Google Deep Male TTS:', e);
+      console.warn('ElevenLabs API unavailable:', e);
     }
   }
 
-  // 2. Try Free Google Deep Male Turkish TTS Endpoint
-  const freeSuccess = await tryFreeGoogleTts(text, onStart, onEnd, onError);
-  if (freeSuccess) return;
-
-  // 3. Fallback to Web Speech API with strict male pitch settings
+  // 3. Fallback to Web Speech API with strict Turkish male voice matching
   fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
 }
 
 const femaleVoiceKeywords = [
-  'google türkçe', 'google turkce', 'yelda', 'filiz', 'female', 'zira', 'susan', 'viki', 
+  'yelda', 'filiz', 'female', 'zira', 'susan', 'viki', 'google',
   'deniz', 'seda', 'gül', 'ece', 'sibel', 'dilek', 'hande', 'hazal', 'yoldaş',
   'gökçe', 'woman', 'lady', 'girl', 'helena', 'catherine', 'eva', 'kadin', 'kadın',
   'victoria', 'samantha', 'karen', 'fiona', 'veena', 'yuri', 'monica',
@@ -931,12 +1064,12 @@ function fallbackWebSpeech(
       utterance.voice = selectedVoice;
     }
 
-    // Force ultra-deep male baritone pitch (0.42) & calm sultan rate (0.80)
-    utterance.pitch = 0.42;
-    utterance.rate = 0.80;
+    // Deep male pitch modulation (0.55 if female voice detected, 0.85 if male voice detected)
+    utterance.pitch = selectedVoice ? (isFemaleVoiceName(selectedVoice.name) ? 0.55 : 0.85) : 0.60;
+    utterance.rate = 0.95;
 
     utterance.onstart = () => {
-      const estDuration = (text.length * 0.085) / 0.80;
+      const estDuration = text.length * 0.07;
       if (onStart) onStart(estDuration);
     };
 

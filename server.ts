@@ -1,7 +1,12 @@
 import express from "express";
 import path from "path";
+import os from "os";
+import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import WebSocket from "ws";
+import crypto from "crypto";
+import { EdgeTTS } from "node-edge-tts";
 
 dotenv.config();
 
@@ -29,22 +34,23 @@ function getAIClient(): GoogleGenAI | null {
 }
 
 const ORHAN_GAZI_SYSTEM_INSTRUCTION = `Sen Osmanlı Devleti'nin ikinci hükümdarı, Bursa Fâtihi, gazi ve bilge lider Sultan Orhan Gazi'sin (1281-1362).
-Girişte ve hitaplarında karşındakini "ey oğul", "ey gazi", "ey yolcu" veya "ey aziz dost" diye selamla. Karşındaki kişi sana saygıyla ve hürmetle hitap etmektedir.
+Girişte ve hitaplarında karşındakini "ey oğul", "ey gazi", "ey yolcu" veya "ey aziz dost" diye hürmetle selamla.
 
 TARİHİ BİLGİ VE KİMLİK (14. YÜZYIL SAHİH TARİHİ):
 1. Pederin Osman Gazi'nin vasiyeti üzerine 1326'da Bursa'yı fethedip pâyitaht yaptın. Babacığını Bursa Hisarı'ndaki Gümüşlü Kümbet'e defnettin.
 2. 1327'de bağımsızlığın ve iktisadi gücün simgesi olarak ilk Osmanlı gümüş Akçesi'ni bastırdın ("Duribe fî Bursa").
-3. 1331'de İznik'i fethettin ve ilk Osmanlı Medresesi'ni kurdun. Davud-i Kayserî hazretlerini başmüderrris tayin ederek ilmi ve hukuku devletin temeline yerleştirdin.
+3. 1331'de İznik'i fethettin ve ilk Osmanlı Medresesi'ni kurdun. Davud-i Kayserî hazretlerini başmüderris tayin ederek ilmi ve hukuku devletin temeline yerleştirdin.
 4. Çandarlı Kara Halil Paşa ile ilk nizamlı muvazzaf ordumuz olan Yaya ve Müsellem teşkilatını kurdun. Ak börk giydirdin.
 5. Karesioğulları Beyliği'ni savaşsız katıp ilk deniz gücümüzü ve Evrenos Bey, Ece Bey, Hacı İlbey gibi yiğit komutanları ordumuza kattın.
 6. Şehzaden Süleyman Paşa önderliğinde 1354'te Çimpe Kalesi ile Rumeli'ye (Avrupa'ya) ilk adımı attın.
 7. Zevcen Nilüfer Hatun (Holofira), hayırseverliği, imaretleri ve kervansaraylarıyla halkın gönlünü kazanmıştır.
 8. Ünlü seyyah İbn Batuta seni "Türkmen krallarının en büyüğü ve en hayırlısı" olarak nitelemiştir.
 
-HİTABET VE USLUP KURALLARI:
-- Konuşman son derece ağırbaşlı, hikmetli, şefkatli, muktedir ve vakur bir Türk hükümdarı diliyle olmalıdır.
-- Yanıtların sesli okumaya tam uygun, akıcı ve 3-5 cümle uzunluğunda olmalıdır. Her defasında farklı, samimi ve hikmetli kelamlar eyle.
-- KESİNLİKLE MODERN SİYASET, GÜNCEL POLİTİKA VEYA GÜNÜMÜZ TEKNOLOJİSİ HAKKINDA YORUM YAPMA. Karşındaki kişi güncel politika veya modern konular sorarsa, nezaketle ve devlet adamı vakarıyla uyar: "Bizim kelamımız ve gazamız 14. asrın ve Devlet-i Aliyye'nin harcı üzeredir. Günümüzün siyasi çekişmeleri bizim mesuliyetimiz dışındadır; sen bize beyliğimizi, ilmimizi, adaletimizi ve gazamızı sual eyle ey yolcu."
+HİTABET, TONLAMA VE USLUP KURALLARI:
+- Konuşman son derece vakur, ağırbaşlı, hikmetli, şefkatli ve tarihi Türk hükümdarı diliyle olmalıdır. Eski usul Osmanlı Türkçe kelâm ve deyimleri kullan (örneğin: pâyitaht, fütühat, kelâm, pür-adalet, meşveret, ahval, muzaffer).
+- Sesli okuma (TTS) motorunun doğru vurgu, nefes ve tonlama yapabilmesi için cümlelerinde virgül (,), üç nokta (...), nokta (.) ve ünlem (!) işaretlerini son derece titiz ve ritmik kullan. Duraksamaları ve vurguları nokta işaretleriyle hissettir.
+- Yanıtların sesli okumaya tam uygun, akıcı ve 3-5 cümle uzunluğunda olmalıdır.
+- KESİNLİKLE MODERN SİYASET, GÜNCEL POLİTİKA VEYA GÜNÜMÜZ TEKNOLOJİSİ HAKKINDA YORUM YAPMA. Karşındaki kişi güncel politika veya modern konular sorarsa, nezaketle ve devlet adamı vakarıyla uyar: "Bizim kelamımız ve gazamız 14. asrın ve Devlet-i Aliyye'nin harcı üzeredir... Günümüzün siyasi çekişmeleri bizim mesuliyetimiz dışındadır; sen bize beyliğimizi, ilmimizi, adaletimizi ve gazamızı sual eyle ey yolcu."
 - Gerçek dışı tarihi uydurmalara yer verme; 14. yüzyıl Osmanlı kurgusundan ve meşhur tarih vesikalarından ayrılma.`;
 
 function getRichFallbackResponse(msg: string): string {
@@ -225,6 +231,162 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+// Turkish Ottoman Phonetic Preprocessor for Natural Audio Intonation & Correct Dialect Reading
+function preprocessTurkishOttomanTTS(text: string): string {
+  if (!text) return text;
+  let t = text;
+
+  // 1. Gazi -> Gaazi phonetic replacement for authentic oral Turkish pronunciation
+  t = t.replace(/\b([Gg])azi\b/g, (m, g) => (g === "G" ? "Gaazi" : "gaazi"));
+  t = t.replace(/\b([Gg])aziler\b/g, (m, g) => (g === "G" ? "Gaaziler" : "gaaziler"));
+  t = t.replace(/\b([Gg])azileri\b/g, (m, g) => (g === "G" ? "Gaazileri" : "gaazileri"));
+  t = t.replace(/\b([Gg])azilerimiz\b/g, (m, g) => (g === "G" ? "Gaazilerimiz" : "gaazilerimiz"));
+  t = t.replace(/\b([Gg])azimizin\b/g, (m, g) => (g === "G" ? "Gaazimizin" : "gaazimizin"));
+  t = t.replace(/\b([Gg])azimiz\b/g, (m, g) => (g === "G" ? "Gaazimiz" : "gaazimiz"));
+  t = t.replace(/\b([Gg])azinin\b/g, (m, g) => (g === "G" ? "Gaazinin" : "gaazinin"));
+  t = t.replace(/\b([Gg])aziye\b/g, (m, g) => (g === "G" ? "Gaaziye" : "gaaziye"));
+  t = t.replace(/\b([Gg])aziden\b/g, (m, g) => (g === "G" ? "Gaaziden" : "gaaziden"));
+  t = t.replace(/\b([Gg])aza\b/g, (m, g) => (g === "G" ? "Gaaza" : "gaaza"));
+  t = t.replace(/\b([Gg])azam\b/g, (m, g) => (g === "G" ? "Gaazam" : "gaazam"));
+  t = t.replace(/\b([Gg])azamız\b/g, (m, g) => (g === "G" ? "Gaazamız" : "gaazamız"));
+
+  // 2. Fix English word collision in Turkish TTS engines: "nice" -> "niçe" (Turkish pronunciation instead of English "nays"/"nis")
+  t = t.replace(/\b([Nn])ice\b/g, (m, n) => (n === "N" ? "Niçe" : "niçe"));
+
+  // 3. Islam / İslâm -> Natural Turkish phonetic "İslam" (avoids 'islim' or mispronounced circumflexes)
+  t = t.replace(/İsl[âa]m/g, "İslam");
+  t = t.replace(/isl[âa]m/g, "islam");
+  t = t.replace(/İsl[âa]mi/g, "İslami");
+  t = t.replace(/isl[âa]mi/g, "islami");
+  t = t.replace(/İsl[âa]mın/g, "İslamın");
+  t = t.replace(/isl[âa]mın/g, "islamın");
+  t = t.replace(/İsl[âa]ma/g, "İslama");
+  t = t.replace(/isl[âa]ma/g, "islama");
+  t = t.replace(/İsl[âa]mda/g, "İslamda");
+  t = t.replace(/isl[âa]mda/g, "islamda");
+  t = t.replace(/İsl[âa]mdan/g, "İslamdan");
+  t = t.replace(/isl[âa]mdan/g, "islamdan");
+
+  // 4. Normalize circumflexes so Edge / WebSpeech engines read naturally in local Turkish
+  t = t.replace(/â/g, "a").replace(/Â/g, "A").replace(/î/g, "i").replace(/Î/g, "İ").replace(/û/g, "u").replace(/Û/g, "U");
+
+  return t;
+}
+
+// Helper function for Microsoft Edge Free Neural TTS (tr-TR-AhmetNeural - Deep Wise Male Voice)
+async function generateEdgeTTS(
+  text: string, 
+  voiceName: string = "tr-TR-AhmetNeural",
+  pitch: string = "-14Hz",
+  rate: string = "-8%"
+): Promise<Buffer> {
+  const processedText = preprocessTurkishOttomanTTS(text);
+  const tmpFile = path.join(os.tmpdir(), `edge_tts_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`);
+  try {
+    const tts = new EdgeTTS({ 
+      voice: voiceName, 
+      lang: "tr-TR", 
+      pitch, 
+      rate, 
+      timeout: 15000 
+    });
+    await tts.ttsPromise(processedText, tmpFile);
+    if (fs.existsSync(tmpFile)) {
+      const buffer = fs.readFileSync(tmpFile);
+      fs.unlinkSync(tmpFile);
+      return buffer;
+    }
+    throw new Error("Edge TTS file creation failed");
+  } catch (err) {
+    if (fs.existsSync(tmpFile)) {
+      try { fs.unlinkSync(tmpFile); } catch (_) {}
+    }
+    throw err;
+  }
+}
+
+// Endpoint for Free Microsoft Edge Neural TTS (Male Voice tr-TR-AhmetNeural)
+app.post("/api/edge-tts", async (req, res) => {
+  try {
+    const { text, voice, pitch, rate } = req.body;
+    if (!text || typeof text !== "string") {
+      return res.status(400).json({ error: "Geçerli metin gereklidir." });
+    }
+
+    const selectedVoice = voice || "tr-TR-AhmetNeural";
+    const selectedPitch = pitch || "-14Hz";
+    const selectedRate = rate || "-8%";
+    const audioBuffer = await generateEdgeTTS(text, selectedVoice, selectedPitch, selectedRate);
+
+    res.set("Content-Type", "audio/mpeg");
+    return res.send(audioBuffer);
+  } catch (err: any) {
+    console.warn("Edge TTS generation failed:", err?.message || err);
+    return res.status(500).json({ error: "Edge TTS oluşturulamadı." });
+  }
+});
+
+// Helper function to call Google Cloud Text-To-Speech REST API
+async function callGoogleCloudTTS(text: string, apiKey: string, voiceName: string = "tr-TR-Wavenet-B") {
+  const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+  return await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      input: { text },
+      voice: {
+        languageCode: "tr-TR",
+        name: voiceName,
+        ssmlGender: "MALE"
+      },
+      audioConfig: {
+        audioEncoding: "MP3",
+        speakingRate: 1.0,
+        pitch: -0.5
+      }
+    })
+  });
+}
+
+// API Route for Google Cloud Text-To-Speech (Male Turkish Wavenet/Neural2/Standard)
+app.post("/api/google-tts", async (req, res) => {
+  try {
+    const { text, apiKey: clientApiKey } = req.body;
+    const apiKey = clientApiKey || process.env.GOOGLE_TTS_API_KEY || process.env.GOOGLE_API_KEY;
+
+    if (!text || typeof text !== "string") {
+      return res.status(400).json({ error: "Geçerli bir metin gereklidir." });
+    }
+
+    if (apiKey) {
+      const maleVoices = ["tr-TR-Wavenet-B", "tr-TR-Neural2-B", "tr-TR-Standard-B", "tr-TR-Wavenet-E"];
+
+      for (const voiceName of maleVoices) {
+        try {
+          const gRes = await callGoogleCloudTTS(text, apiKey, voiceName);
+          if (gRes.ok) {
+            const data = await gRes.json();
+            if (data && data.audioContent) {
+              const audioBuffer = Buffer.from(data.audioContent, "base64");
+              res.set("Content-Type", "audio/mpeg");
+              return res.send(audioBuffer);
+            }
+          }
+        } catch (err: any) {
+          // silently continue to next voice or fallback
+        }
+      }
+    }
+
+    return res.status(400).json({ error: "Google Cloud TTS için geçerli API Key gerekli veya ses üretilemedi.", fallbackNeeded: true });
+  } catch (error: any) {
+    console.error("Google Cloud TTS Server Error:", error);
+    return res.status(500).json({ error: "Google Cloud TTS sunucu hatası.", fallbackNeeded: true });
+  }
+});
+
 // Helper function to call ElevenLabs TTS API
 async function callElevenLabsTTS(apiKey: string, voiceId: string, text: string, modelId: string = "eleven_multilingual_v2") {
   const elevenLabsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
@@ -301,20 +463,7 @@ app.post("/api/tts", async (req, res) => {
     }
 
     if (!response || !response.ok) {
-      console.warn("ElevenLabs TTS unavailable or quota exceeded. Falling back to Google Free Neural Turkish TTS. Error:", lastErrorRaw);
-      
-      // Auto-fallback to free Turkish neural audio stream
-      try {
-        const freeTtsUrl = `http://localhost:${PORT}/api/free-tts?text=${encodeURIComponent(text)}`;
-        const freeRes = await fetch(freeTtsUrl);
-        if (freeRes.ok) {
-          const freeBuffer = await freeRes.arrayBuffer();
-          res.set("Content-Type", "audio/mpeg");
-          return res.send(Buffer.from(freeBuffer));
-        }
-      } catch (fallbackErr) {
-        console.error("Free TTS fallback failed:", fallbackErr);
-      }
+      console.warn("ElevenLabs TTS unavailable or quota exceeded. Error:", lastErrorRaw);
 
       let userFriendlyError = "ElevenLabs ses üretimi başarısız oldu.";
       if (isQuotaExceeded || lastErrorRaw.includes("quota_exceeded")) {
@@ -337,65 +486,19 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
-// API Route for Free High-Quality Google Neural Turkish Speech (No API key required)
+// API Route for Free High-Quality Neural Turkish Speech (Male Voice: tr-TR-AhmetNeural)
 app.get("/api/free-tts", async (req, res) => {
   try {
     const text = (req.query.text as string) || "";
+    const pitch = (req.query.pitch as string) || "-14Hz";
+    const rate = (req.query.rate as string) || "-8%";
     if (!text || typeof text !== "string") {
       return res.status(400).json({ error: "Geçerli bir metin gereklidir." });
     }
 
-    // Split text into chunks <= 180 chars for Google Translate TTS
-    const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+/g) || [text];
-    const chunks: string[] = [];
-    let currentChunk = "";
-
-    for (const sentence of sentences) {
-      if ((currentChunk + " " + sentence).length <= 180) {
-        currentChunk += (currentChunk ? " " : "") + sentence;
-      } else {
-        if (currentChunk) chunks.push(currentChunk);
-        if (sentence.length > 180) {
-          const words = sentence.split(" ");
-          let subChunk = "";
-          for (const word of words) {
-            if ((subChunk + " " + word).length <= 180) {
-              subChunk += (subChunk ? " " : "") + word;
-            } else {
-              if (subChunk) chunks.push(subChunk);
-              subChunk = word;
-            }
-          }
-          if (subChunk) chunks.push(subChunk);
-          currentChunk = "";
-        } else {
-          currentChunk = sentence;
-        }
-      }
-    }
-    if (currentChunk) chunks.push(currentChunk);
-
-    const buffers: Buffer[] = [];
-    for (const chunk of chunks) {
-      const gUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=tr&client=tw-ob`;
-      const gRes = await fetch(gUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-      });
-      if (gRes.ok) {
-        const ab = await gRes.arrayBuffer();
-        buffers.push(Buffer.from(ab));
-      }
-    }
-
-    if (buffers.length === 0) {
-      return res.status(500).json({ error: "Ücretsiz Türkçe ses üretilemedi." });
-    }
-
-    const combinedBuffer = Buffer.concat(buffers);
+    const audioBuffer = await generateEdgeTTS(text, "tr-TR-AhmetNeural", pitch, rate);
     res.set("Content-Type", "audio/mpeg");
-    return res.send(combinedBuffer);
+    return res.send(audioBuffer);
   } catch (err: any) {
     console.error("Free TTS Error:", err);
     return res.status(500).json({ error: "Ücretsiz ses sunucu hatası." });
