@@ -38,15 +38,23 @@ export const TextInputModal: React.FC<TextInputModalProps> = ({
         </button>
 
         {/* Modal Header */}
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-3">
           <Sparkles className="w-5 h-5 text-[#eebb55]" />
           <h2 className="font-mono text-sm font-bold text-white uppercase tracking-wider">
             HÜNKÂR ORHAN GAZİ'YE SUAL
           </h2>
         </div>
 
+        {/* Mobile Voice Keyboard Tip */}
+        <div className="mb-4 p-2.5 rounded-lg bg-amber-950/40 border border-amber-700/40 text-amber-200 text-xs font-mono flex items-center gap-2">
+          <span className="text-base">🎙️</span>
+          <span>
+            <strong>Mobil İpucu:</strong> Klavyenizdeki Mikrofon simgesine basarak sualinizi sesle de yazdırabilirsiniz.
+          </span>
+        </div>
+
         <p className="font-mono text-xs text-zinc-400 mb-4 leading-relaxed">
-          Devletleşme dönemi, Bursa'nın fethi, teşkilatlanma veya ilk medrese hakkında merak ettiklerinizi doğrudan yazınız:
+          Devletleşme dönemi, Bursa'nın fethi, teşkilatlanma veya ilk medrese hakkında merak ettiklerinizi yazınız:
         </p>
 
         {/* Form */}

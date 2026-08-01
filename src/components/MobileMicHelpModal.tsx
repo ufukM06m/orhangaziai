@@ -30,6 +30,36 @@ export const MobileMicHelpModal: React.FC<MobileMicHelpModalProps> = ({
     window.open(window.location.href, '_blank');
   };
 
+  const handleRequestBrowserMicPermission = async () => {
+    soundEngine.playClick();
+    setIsTestingMic(true);
+    setTestResult('idle');
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setTestResult('denied');
+      setIsTestingMic(false);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Release tracks so SpeechRecognition or recorder can use mic hardware
+      stream.getTracks().forEach((track) => track.stop());
+      setTestResult('success');
+      setIsTestingMic(false);
+      
+      // Auto close and start mic after 600ms
+      setTimeout(() => {
+        onClose();
+        onRetryMic();
+      }, 600);
+    } catch (err) {
+      console.warn('Browser getUserMedia permission request failed:', err);
+      setTestResult('denied');
+      setIsTestingMic(false);
+    }
+  };
+
   const handleDirectActivateMic = () => {
     soundEngine.playClick();
     onClose();
@@ -236,18 +266,31 @@ export const MobileMicHelpModal: React.FC<MobileMicHelpModalProps> = ({
               onClose();
               onOpenTextInput();
             }}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800 text-zinc-200 font-mono text-xs transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800 text-zinc-200 font-mono text-xs transition-all cursor-pointer"
           >
             <Keyboard className="w-4 h-4 text-[#eebb55]" />
-            <span>Yazılı Sual Sor (Alternatif)</span>
+            <span>Klavye İle Sual (Sesli Yazma 🎙️)</span>
+          </button>
+
+          <button
+            onClick={handleRequestBrowserMicPermission}
+            disabled={isTestingMic}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 border border-[#eebb55] hover:bg-amber-500/30 text-[#eebb55] font-bold font-mono text-xs transition-all cursor-pointer disabled:opacity-50"
+          >
+            {isTestingMic ? (
+              <RefreshCw className="w-4 h-4 animate-spin text-[#eebb55]" />
+            ) : (
+              <Mic className="w-4 h-4 text-[#eebb55]" />
+            )}
+            <span>{isTestingMic ? 'İzin İsteniyor...' : 'Sistemden İzin İste & Başlat'}</span>
           </button>
 
           <button
             onClick={handleDirectActivateMic}
-            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#eebb55] hover:bg-[#ffc955] text-black font-bold font-mono text-xs transition-all shadow-[0_0_20px_rgba(238,187,85,0.4)] cursor-pointer"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#eebb55] hover:bg-[#ffc955] text-black font-bold font-mono text-xs transition-all shadow-[0_0_20px_rgba(238,187,85,0.4)] cursor-pointer"
           >
             <Mic className="w-4 h-4 text-black" />
-            <span>Mikrofona Dokun & Dinlemeyi Başlat</span>
+            <span>Doğrudan Dinle</span>
           </button>
         </div>
 
