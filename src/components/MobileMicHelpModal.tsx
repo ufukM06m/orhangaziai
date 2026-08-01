@@ -30,34 +30,11 @@ export const MobileMicHelpModal: React.FC<MobileMicHelpModalProps> = ({
     window.open(window.location.href, '_blank');
   };
 
-  const handleTestMicPermission = async () => {
+  const handleDirectActivateMic = () => {
     soundEngine.playClick();
-    setIsTestingMic(true);
-    setTestResult('idle');
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setTestResult('denied');
-      setIsTestingMic(false);
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Stop stream immediately after permission check
-      stream.getTracks().forEach((track) => track.stop());
-      setTestResult('success');
-      setIsTestingMic(false);
-      
-      // Short delay before closing and starting recognition
-      setTimeout(() => {
-        onClose();
-        onRetryMic();
-      }, 700);
-    } catch (err) {
-      console.warn('Microphone permission test failed:', err);
-      setTestResult('denied');
-      setIsTestingMic(false);
-    }
+    onClose();
+    // Synchronously trigger mic activation within user tap event
+    onRetryMic();
   };
 
   return (
@@ -266,16 +243,11 @@ export const MobileMicHelpModal: React.FC<MobileMicHelpModalProps> = ({
           </button>
 
           <button
-            onClick={handleTestMicPermission}
-            disabled={isTestingMic}
-            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#eebb55] hover:bg-[#ffc955] text-black font-bold font-mono text-xs transition-all shadow-[0_0_20px_rgba(238,187,85,0.4)] disabled:opacity-50 cursor-pointer"
+            onClick={handleDirectActivateMic}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#eebb55] hover:bg-[#ffc955] text-black font-bold font-mono text-xs transition-all shadow-[0_0_20px_rgba(238,187,85,0.4)] cursor-pointer"
           >
-            {isTestingMic ? (
-              <RefreshCw className="w-4 h-4 animate-spin text-black" />
-            ) : (
-              <Mic className="w-4 h-4 text-black" />
-            )}
-            <span>{isTestingMic ? 'Test Ediliyor...' : 'Mikrofon İznini Test Et & Başlat'}</span>
+            <Mic className="w-4 h-4 text-black" />
+            <span>Mikrofona Dokun & Dinlemeyi Başlat</span>
           </button>
         </div>
 
