@@ -685,7 +685,7 @@ export interface VoiceConfig {
 }
 
 export const defaultVoiceConfig: VoiceConfig = {
-  useElevenLabs: true,
+  useElevenLabs: false,
   elevenLabsApiKey: '',
   elevenLabsVoiceId: 'mF7tIc9VLrznhGooGjaT', // Seyfullah - Tok & Derin Erkek Sesi
   pitch: 0.85,
@@ -705,7 +705,97 @@ export function stopAllSpeech() {
   }
 }
 
-// Speak text with ElevenLabs priority & strictly male Web Speech fallback
+// Web Audio Context for deep male voice DSP processing
+let deepVoiceAudioCtx: AudioContext | null = null;
+
+function applyDeepMaleVoiceFilter(audioElement: HTMLAudioElement) {
+  try {
+    // Disable pitch preservation so lowering playbackRate physically lowers vocal pitch by ~4 semitones
+    (audioElement as any).preservesPitch = false;
+    (audioElement as any).mozPreservesPitch = false;
+    (audioElement as any).webkitPreservesPitch = false;
+    audioElement.playbackRate = 0.81; // Lower frequency down into deep male baritone register
+
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioCtx) {
+      if (!deepVoiceAudioCtx) {
+        deepVoiceAudioCtx = new AudioCtx();
+      }
+      if (deepVoiceAudioCtx.state === 'suspended') {
+        deepVoiceAudioCtx.resume();
+      }
+
+      const source = deepVoiceAudioCtx.createMediaElementSource(audioElement);
+
+      // 1. Lowpass Filter: Cut frequencies above 2200Hz to eliminate thin/female treble brightness
+      const lowpass = deepVoiceAudioCtx.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = 2200;
+
+      // 2. Lowshelf Bass Filter: Boost 140Hz chest resonance (+6dB) for Orhan Gazi's deep, dignified tone
+      const bassBoost = deepVoiceAudioCtx.createBiquadFilter();
+      bassBoost.type = 'lowshelf';
+      bassBoost.frequency.value = 140;
+      bassBoost.gain.value = 6.0;
+
+      source.connect(lowpass);
+      lowpass.connect(bassBoost);
+      bassBoost.connect(deepVoiceAudioCtx.destination);
+    }
+  } catch (e) {
+    console.warn('Deep voice Web Audio filter warning:', e);
+    try {
+      audioElement.playbackRate = 0.81;
+    } catch (_) {}
+  }
+}
+
+// Helper to try Free Google Neural Turkish TTS Endpoint with Deep Male Pitch Modulation
+async function tryFreeGoogleTts(
+  text: string,
+  onStart?: (durationSeconds?: number) => void,
+  onEnd?: () => void,
+  onError?: () => void
+): Promise<boolean> {
+  try {
+    const url = `/api/free-tts?text=${encodeURIComponent(text)}`;
+    const response = await fetch(url);
+    if (response.ok) {
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const audio = new Audio(blobUrl);
+      currentAudio = audio;
+
+      // Apply deep male baritone transformation filter
+      applyDeepMaleVoiceFilter(audio);
+
+      audio.onplay = () => {
+        const duration = audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)
+          ? audio.duration
+          : text.length * 0.095;
+        if (onStart) onStart(duration);
+      };
+
+      audio.onended = () => {
+        currentAudio = null;
+        if (onEnd) onEnd();
+      };
+
+      audio.onerror = () => {
+        currentAudio = null;
+        if (onError) onError();
+      };
+
+      await audio.play();
+      return true;
+    }
+  } catch (e) {
+    console.warn('Free Google TTS error:', e);
+  }
+  return false;
+}
+
+// Speak text with ElevenLabs priority -> Free Deep Male Neural Turkish TTS -> Web Speech fallback
 export async function speakText(
   text: string,
   config: VoiceConfig = defaultVoiceConfig,
@@ -716,15 +806,18 @@ export async function speakText(
 ) {
   stopAllSpeech();
 
-  // Try ElevenLabs proxy endpoint first if configured or by default
-  if (config.useElevenLabs) {
+  // 1. Try ElevenLabs / Server-side TTS proxy endpoint first if an API key is available
+  const localKey = typeof window !== 'undefined' ? (localStorage.getItem('elevenlabs_api_key') || undefined) : undefined;
+  const hasElevenKey = Boolean(config.elevenLabsApiKey || localKey);
+
+  if (config.useElevenLabs && hasElevenKey) {
     try {
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
-          apiKey: config.elevenLabsApiKey || undefined,
+          apiKey: config.elevenLabsApiKey || localKey || undefined,
           voiceId: 'mF7tIc9VLrznhGooGjaT', // Seyfullah Tok Erkek Sesi
         }),
       });
@@ -749,41 +842,51 @@ export async function speakText(
           if (onEnd) onEnd();
         };
 
-        audio.onerror = () => {
+        audio.onerror = async () => {
           currentAudio = null;
-          fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
+          const freeSuccess = await tryFreeGoogleTts(text, onStart, onEnd, onError);
+          if (!freeSuccess) {
+            fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
+          }
         };
 
         try {
           await audio.play();
           return;
         } catch (playErr) {
-          console.warn('Audio play failed, falling back to WebSpeech:', playErr);
+          console.warn('Audio play failed, trying Free Google Deep Male TTS:', playErr);
           if (!started && onStart) onStart(text.length * 0.085);
-          fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
+          const freeSuccess = await tryFreeGoogleTts(text, onStart, onEnd, onError);
+          if (!freeSuccess) {
+            fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
+          }
           return;
         }
       }
     } catch (e) {
-      console.warn('ElevenLabs API unavailable, falling back to Deep Male Web Speech:', e);
+      console.warn('ElevenLabs API unavailable, trying Free Google Deep Male TTS:', e);
     }
   }
 
-  // Fallback to Web Speech API with strict male voice enforcement & word boundary events
+  // 2. Try Free Google Deep Male Turkish TTS Endpoint
+  const freeSuccess = await tryFreeGoogleTts(text, onStart, onEnd, onError);
+  if (freeSuccess) return;
+
+  // 3. Fallback to Web Speech API with strict male pitch settings
   fallbackWebSpeech(text, config, onStart, onEnd, onError, onBoundary);
 }
 
 const femaleVoiceKeywords = [
   'google türkçe', 'google turkce', 'yelda', 'filiz', 'female', 'zira', 'susan', 'viki', 
-  'deniz', 'seda', 'gül', 'ece', 'sibel', 'dilek', 'hande', 'hazal', 
-  'gökçe', 'woman', 'lady', 'girl', 'helena', 'catherine', 'eva', 
+  'deniz', 'seda', 'gül', 'ece', 'sibel', 'dilek', 'hande', 'hazal', 'yoldaş',
+  'gökçe', 'woman', 'lady', 'girl', 'helena', 'catherine', 'eva', 'kadin', 'kadın',
   'victoria', 'samantha', 'karen', 'fiona', 'veena', 'yuri', 'monica',
   'linda', 'laura', 'amlie', 'anna', 'alice', 'joana', 'luciana', 'cortana', 'siri'
 ];
 
-function isFemaleVoice(voice: SpeechSynthesisVoice): boolean {
-  const name = voice.name.toLowerCase();
-  return femaleVoiceKeywords.some((kw) => name.includes(kw));
+function isFemaleVoiceName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return femaleVoiceKeywords.some((kw) => lower.includes(kw));
 }
 
 function fallbackWebSpeech(
@@ -802,58 +905,66 @@ function fallbackWebSpeech(
 
   window.speechSynthesis.cancel();
 
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = 'tr-TR';
-  utterance.rate = config.rate || 0.84;
-  utterance.pitch = config.pitch || 0.85;
-  
-  const voices = window.speechSynthesis.getVoices();
-  const maleKeywords = ['male', 'erkek', 'tolga', 'cem', 'ahmet', 'hakan', 'emre', 'davut', 'adam', 'david', 'stefan', 'george', 'alex', 'daniel'];
+  const speakWithVoice = () => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'tr-TR';
 
-  const turkishVoices = voices.filter((v) => v.lang.toLowerCase().includes('tr'));
-  let selectedVoice = turkishVoices.find((v) =>
-    maleKeywords.some((kw) => v.name.toLowerCase().includes(kw))
-  );
+    const voices = window.speechSynthesis.getVoices();
+    const turkishVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('tr'));
 
-  // If no explicitly male Turkish voice, pick any Turkish voice
-  if (!selectedVoice && turkishVoices.length > 0) {
-    selectedVoice = turkishVoices[0];
-  }
+    const maleKeywords = ['ahmet', 'tolga', 'cem', 'hakan', 'emre', 'davut', 'murat', 'ali', 'can', 'male', 'erkek'];
 
-  // If no Turkish voice at all, try male voices in other languages
-  if (!selectedVoice) {
-    selectedVoice = voices.find((v) => maleKeywords.some((kw) => v.name.toLowerCase().includes(kw))) || voices[0];
-  }
+    let selectedVoice = turkishVoices.find((v) =>
+      maleKeywords.some((kw) => v.name.toLowerCase().includes(kw))
+    );
 
-  if (selectedVoice) {
-    utterance.voice = selectedVoice;
-  }
-
-  // Force deep male pitch (0.38) if using default/female voice, otherwise deep pitch (0.70)
-  const isFemale = selectedVoice ? isFemaleVoice(selectedVoice) : true;
-  utterance.pitch = isFemale ? 0.38 : (config.pitch || 0.70);
-  utterance.rate = config.rate || 0.82;
-
-  utterance.onstart = () => {
-    const estDuration = (text.length * 0.08) / (config.rate || 0.84);
-    if (onStart) onStart(estDuration);
-  };
-
-  utterance.onboundary = (event: SpeechSynthesisEvent) => {
-    if (onBoundary) {
-      const idx = event.charIndex;
-      const len = event.charLength || 0;
-      onBoundary(idx, len);
+    // If no explicit male named voice found, pick any turkish voice NOT matching female keywords
+    if (!selectedVoice) {
+      selectedVoice = turkishVoices.find((v) => !isFemaleVoiceName(v.name));
     }
+
+    if (!selectedVoice && turkishVoices.length > 0) {
+      selectedVoice = turkishVoices[0];
+    }
+
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+
+    // Force ultra-deep male baritone pitch (0.42) & calm sultan rate (0.80)
+    utterance.pitch = 0.42;
+    utterance.rate = 0.80;
+
+    utterance.onstart = () => {
+      const estDuration = (text.length * 0.085) / 0.80;
+      if (onStart) onStart(estDuration);
+    };
+
+    utterance.onboundary = (event: SpeechSynthesisEvent) => {
+      if (onBoundary) {
+        const idx = event.charIndex;
+        const len = event.charLength || 0;
+        onBoundary(idx, len);
+      }
+    };
+
+    utterance.onend = () => {
+      if (onEnd) onEnd();
+    };
+
+    utterance.onerror = () => {
+      if (onError) onError();
+    };
+
+    window.speechSynthesis.speak(utterance);
   };
 
-  utterance.onend = () => {
-    if (onEnd) onEnd();
-  };
-
-  utterance.onerror = () => {
-    if (onError) onError();
-  };
-
-  window.speechSynthesis.speak(utterance);
+  if (window.speechSynthesis.getVoices().length === 0) {
+    window.speechSynthesis.onvoiceschanged = () => {
+      speakWithVoice();
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  } else {
+    speakWithVoice();
+  }
 }

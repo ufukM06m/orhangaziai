@@ -40,7 +40,7 @@ export default function App() {
       rec.maxAlternatives = 1;
 
       rec.onresult = async (event: any) => {
-        const userSpeech = event.results[0][0].transcript;
+        const userSpeech = event.results[0][0]?.transcript;
         if (!userSpeech) return;
 
         soundEngine.playClick();
@@ -52,14 +52,17 @@ export default function App() {
         setVoiceState('idle');
 
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          setStatusLabelText('MİKROFON İZNİ YOK');
-          typeWriterInstant('> Tarayıcı mikrofon izni verilmedi. Üst bar veya adres çubuğundan izin verin veya "Yazı İle Sual Sor" seçeneğini kullanın.');
+          setStatusLabelText('MİKROFON İZNİ VERİLMEDİ');
+          typeWriterInstant('> Mobil tarayıcı mikrofon izni vermedi. Lütfen adres çubuğundaki kilit ikonuna basıp mikrofona izin veriniz.');
         } else if (event.error === 'network') {
           setStatusLabelText('BAĞLANTI UYARISI');
-          typeWriterInstant('> Ses tanıma bağlantısı kurulamadı. "Yazı İle Sual Sor" butonundan yazarak Orhan Gazi ile konuşabilirsiniz.');
+          typeWriterInstant('> Ses tanıma ağına ulaşılamadı. "Yazı İle Sual Sor" seçeneğini kullanabilirsiniz.');
+        } else if (event.error === 'no-speech') {
+          setStatusLabelText('SES ALINAMADI');
+          typeWriterInstant('> Mikrofondan ses alınamadı. Lütfen daha yakın ve yüksek sesle söyleyiniz...');
         } else {
-          setStatusLabelText('SES DUYULAMADI');
-          typeWriterInstant('> Sualiniz tam anlaşılamadı. Dilerseniz mikrofona tekrar basın veya yazarak sual yöneltin...');
+          setStatusLabelText('SES ALINAMADI');
+          typeWriterInstant('> Sualiniz tam anlaşılamadı. Dilerseniz mikrofona tekrar basın veya yazarak iletin...');
         }
 
         setTimeout(() => {
@@ -68,7 +71,7 @@ export default function App() {
       };
 
       rec.onend = () => {
-        // Will be managed by handleUserMessage or reset
+        // Managed by handleUserMessage or reset
       };
 
       recognitionRef.current = rec;
@@ -205,27 +208,76 @@ export default function App() {
     }
   };
 
-  // Toggle Microphone
-  const handleToggleMic = () => {
+  // Toggle Microphone with Mobile Permission Prompt Support
+  const handleToggleMic = async () => {
     if (window.speechSynthesis) window.speechSynthesis.cancel();
     soundEngine.playClick();
 
-    if (!recognitionRef.current) {
-      setIsTextInputOpen(true);
-      return;
-    }
-
     if (voiceState === 'listening') {
       try {
-        recognitionRef.current.stop();
+        recognitionRef.current?.stop();
       } catch (_) {}
       setVoiceState('idle');
       setStatusLabelText('SESLİ İLETİŞİM');
-    } else {
+      return;
+    }
+
+    // Step 1: Explicitly request browser microphone permission via getUserMedia
+    // This triggers native iOS Safari and Android Chrome permission dialogs
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       try {
-        // Abort previous instances if active to avoid "recognition has already started" error
-        recognitionRef.current.abort();
-      } catch (_) {}
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Permission granted! Stop dummy stream tracks immediately so speech recognition can use mic
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        console.warn('Microphone permission error:', err);
+        setStatusLabelText('MİKROFON İZNİ GEREKLİ');
+        typeWriterInstant('> Mobil cihazınızda mikrofon izni verilmedi. Lütfen adres çubuğundaki kilit simgesinden mikrofona izin veriniz.');
+        setVoiceState('idle');
+        return;
+      }
+    }
+
+    // Step 2: Fallback SpeechRecognition initialization if not set
+    if (!recognitionRef.current) {
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+      if (SpeechRecognition) {
+        const rec = new SpeechRecognition();
+        rec.lang = 'tr-TR';
+        rec.interimResults = false;
+        rec.maxAlternatives = 1;
+        rec.onresult = async (event: any) => {
+          const userSpeech = event.results[0][0]?.transcript;
+          if (!userSpeech) return;
+          soundEngine.playClick();
+          handleUserMessage(userSpeech);
+        };
+        rec.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error);
+          setVoiceState('idle');
+          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            setStatusLabelText('MİKROFON İZNİ VERİLMEDİ');
+            typeWriterInstant('> Mobil tarayıcı mikrofon izni vermedi.');
+          } else {
+            setStatusLabelText('SES ALINAMADI');
+            typeWriterInstant('> Mikrofondan ses alınamadı. Lütfen tekrar deneyiniz...');
+          }
+          setTimeout(() => setStatusLabelText('SESLİ İLETİŞİM'), 3500);
+        };
+        recognitionRef.current = rec;
+      } else {
+        setStatusLabelText('SES DESTEKLENMİYOR');
+        typeWriterInstant('> Bu mobil tarayıcıda ses tanıma desteklenmiyor. "Yazı İle Sual Sor" kutusuna yönlendiriliyorsunuz...');
+        setTimeout(() => setIsTextInputOpen(true), 1200);
+        return;
+      }
+    }
+
+    try {
+      // Abort previous instances if active
+      try { recognitionRef.current.abort(); } catch (_) {}
 
       setTimeout(() => {
         try {
@@ -234,11 +286,13 @@ export default function App() {
           setStatusLabelText('SİZİ DİNLİYOR...');
           typeWriterInstant('> Sizi dinliyoruz, sualinizi mikrofona iletiniz...');
         } catch (e) {
-          // If already starting or active, set state smoothly
+          console.warn('Recognition start exception:', e);
           setVoiceState('listening');
           setStatusLabelText('SİZİ DİNLİYOR...');
         }
-      }, 60);
+      }, 80);
+    } catch (e) {
+      console.error('Mic toggle error:', e);
     }
   };
 

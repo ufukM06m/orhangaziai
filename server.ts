@@ -226,7 +226,7 @@ app.post("/api/chat", async (req, res) => {
 });
 
 // Helper function to call ElevenLabs TTS API
-async function callElevenLabsTTS(apiKey: string, voiceId: string, text: string) {
+async function callElevenLabsTTS(apiKey: string, voiceId: string, text: string, modelId: string = "eleven_multilingual_v2") {
   const elevenLabsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
   return await fetch(elevenLabsUrl, {
     method: "POST",
@@ -237,9 +237,9 @@ async function callElevenLabsTTS(apiKey: string, voiceId: string, text: string) 
     },
     body: JSON.stringify({
       text: text,
-      model_id: "eleven_multilingual_v2",
+      model_id: modelId,
       voice_settings: {
-        stability: 0.68,
+        stability: 0.65,
         similarity_boost: 0.85,
         style: 0.0,
         use_speaker_boost: true
@@ -264,37 +264,66 @@ app.post("/api/tts", async (req, res) => {
     }
 
     // List of premade male voices supported on all ElevenLabs tiers (Free & Paid)
-    const maleVoiceCandidates = [
+    const maleVoiceCandidates = Array.from(new Set([
       clientVoiceId,
       "JBFvLpsea8v128hqFTEj", // George (Warm, deep, mature male)
       "pNInz6obpgDQGcFmaJgB", // Adam (Deep male)
       "N2lVS1w4EtoT3dr4eOWO", // Callum (Intense deep male)
-      "mF7tIc9VLrznhGooGjaT"  // Seyfullah (Library voice)
-    ].filter(Boolean) as string[];
+      "VR6AewLTigWG4xSOukaG", // Arnold (Deep male)
+      "ErXwobaYiN019PkySvjV", // Antoni (Deep male)
+    ].filter(Boolean))) as string[];
+
+    const modelsToTry = ["eleven_multilingual_v2", "eleven_turbo_v2_5", "eleven_flash_v2_5"];
 
     let response: Response | null = null;
-    let lastError: string = "";
+    let lastErrorRaw: string = "";
+    let isQuotaExceeded = false;
 
     for (const voiceId of maleVoiceCandidates) {
-      try {
-        const resCandidate = await callElevenLabsTTS(apiKey, voiceId, text);
-        if (resCandidate.ok) {
-          response = resCandidate;
-          break;
-        } else {
-          lastError = await resCandidate.text();
-          console.warn(`ElevenLabs voice ${voiceId} returned status ${resCandidate.status}: ${lastError}`);
+      for (const modelId of modelsToTry) {
+        try {
+          const resCandidate = await callElevenLabsTTS(apiKey, voiceId, text, modelId);
+          if (resCandidate.ok) {
+            response = resCandidate;
+            break;
+          } else {
+            lastErrorRaw = await resCandidate.text();
+            if (lastErrorRaw.includes("quota_exceeded")) {
+              isQuotaExceeded = true;
+            }
+            console.warn(`ElevenLabs voice ${voiceId} (${modelId}) returned status ${resCandidate.status}: ${lastErrorRaw}`);
+          }
+        } catch (err: any) {
+          console.warn(`ElevenLabs call error for voice ${voiceId} (${modelId}):`, err?.message || err);
         }
-      } catch (err: any) {
-        console.warn(`ElevenLabs call error for voice ${voiceId}:`, err?.message || err);
       }
+      if (response && response.ok) break;
     }
 
     if (!response || !response.ok) {
-      console.error("ElevenLabs TTS failed for all candidate voices. Last error:", lastError);
-      return res.status(500).json({ 
-        error: "ElevenLabs ses üretimi başarısız oldu.", 
-        details: lastError,
+      console.warn("ElevenLabs TTS unavailable or quota exceeded. Falling back to Google Free Neural Turkish TTS. Error:", lastErrorRaw);
+      
+      // Auto-fallback to free Turkish neural audio stream
+      try {
+        const freeTtsUrl = `http://localhost:${PORT}/api/free-tts?text=${encodeURIComponent(text)}`;
+        const freeRes = await fetch(freeTtsUrl);
+        if (freeRes.ok) {
+          const freeBuffer = await freeRes.arrayBuffer();
+          res.set("Content-Type", "audio/mpeg");
+          return res.send(Buffer.from(freeBuffer));
+        }
+      } catch (fallbackErr) {
+        console.error("Free TTS fallback failed:", fallbackErr);
+      }
+
+      let userFriendlyError = "ElevenLabs ses üretimi başarısız oldu.";
+      if (isQuotaExceeded || lastErrorRaw.includes("quota_exceeded")) {
+        userFriendlyError = "ELEVENLABS KREDİSİ BİTMİŞ (0 KREDİ KALDI).";
+      }
+      return res.status(400).json({ 
+        error: userFriendlyError, 
+        details: lastErrorRaw,
+        quotaExceeded: isQuotaExceeded,
         fallbackNeeded: true 
       });
     }
@@ -305,6 +334,71 @@ app.post("/api/tts", async (req, res) => {
   } catch (error: any) {
     console.error("TTS Server Error:", error);
     return res.status(500).json({ error: "Ses motoru hatası.", fallbackNeeded: true });
+  }
+});
+
+// API Route for Free High-Quality Google Neural Turkish Speech (No API key required)
+app.get("/api/free-tts", async (req, res) => {
+  try {
+    const text = (req.query.text as string) || "";
+    if (!text || typeof text !== "string") {
+      return res.status(400).json({ error: "Geçerli bir metin gereklidir." });
+    }
+
+    // Split text into chunks <= 180 chars for Google Translate TTS
+    const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+/g) || [text];
+    const chunks: string[] = [];
+    let currentChunk = "";
+
+    for (const sentence of sentences) {
+      if ((currentChunk + " " + sentence).length <= 180) {
+        currentChunk += (currentChunk ? " " : "") + sentence;
+      } else {
+        if (currentChunk) chunks.push(currentChunk);
+        if (sentence.length > 180) {
+          const words = sentence.split(" ");
+          let subChunk = "";
+          for (const word of words) {
+            if ((subChunk + " " + word).length <= 180) {
+              subChunk += (subChunk ? " " : "") + word;
+            } else {
+              if (subChunk) chunks.push(subChunk);
+              subChunk = word;
+            }
+          }
+          if (subChunk) chunks.push(subChunk);
+          currentChunk = "";
+        } else {
+          currentChunk = sentence;
+        }
+      }
+    }
+    if (currentChunk) chunks.push(currentChunk);
+
+    const buffers: Buffer[] = [];
+    for (const chunk of chunks) {
+      const gUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=tr&client=tw-ob`;
+      const gRes = await fetch(gUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      });
+      if (gRes.ok) {
+        const ab = await gRes.arrayBuffer();
+        buffers.push(Buffer.from(ab));
+      }
+    }
+
+    if (buffers.length === 0) {
+      return res.status(500).json({ error: "Ücretsiz Türkçe ses üretilemedi." });
+    }
+
+    const combinedBuffer = Buffer.concat(buffers);
+    res.set("Content-Type", "audio/mpeg");
+    return res.send(combinedBuffer);
+  } catch (err: any) {
+    console.error("Free TTS Error:", err);
+    return res.status(500).json({ error: "Ücretsiz ses sunucu hatası." });
   }
 });
 
